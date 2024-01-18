@@ -23,6 +23,7 @@ export const AdvancedConfigDefaults = (): ProfileType['advancedConfig'] => ({
     'store-cache': true,
     'store-fake-ip': false
   },
+  domain_strategy: 'prefer_ipv4',
   'tcp-fast-open': false,
   'tcp-multi-path': false,
   'udp-fragment': false,
@@ -37,7 +38,9 @@ export const TunConfigDefaults: ProfileType['tunConfig'] = {
   interface_name: 'singbox',
   mtu: 9000,
   'strict-route': true,
-  'endpoint-independent-nat': false
+  'endpoint-independent-nat': false,
+  'inet4-address': '172.19.0.1/30',
+  'inet6-address': 'fdfe:dcba:9876::1/126',
 }
 
 export const DnsConfigDefaults: ProfileType['dnsConfig'] = {
@@ -82,7 +85,8 @@ export const ProxyGroupsConfigDefaults = (): ProfileType['proxyGroupsConfig'] =>
       use: [],
       url: '',
       interval: 300,
-      tolerance: 150
+      tolerance: 150,
+      filter: ''
     },
     {
       id: id2,
@@ -92,7 +96,8 @@ export const ProxyGroupsConfigDefaults = (): ProfileType['proxyGroupsConfig'] =>
       use: [],
       url: 'https://www.gstatic.com/generate_204',
       interval: 300,
-      tolerance: 150
+      tolerance: 150,
+      filter: ''
     },
     {
       id: id3,
@@ -105,7 +110,8 @@ export const ProxyGroupsConfigDefaults = (): ProfileType['proxyGroupsConfig'] =>
       use: [],
       url: '',
       interval: 300,
-      tolerance: 150
+      tolerance: 150,
+      filter: ''
     },
     {
       id: id4,
@@ -118,7 +124,8 @@ export const ProxyGroupsConfigDefaults = (): ProfileType['proxyGroupsConfig'] =>
       use: [],
       url: '',
       interval: 300,
-      tolerance: 150
+      tolerance: 150,
+      filter: ''
     },
     {
       id: id5,
@@ -131,7 +138,8 @@ export const ProxyGroupsConfigDefaults = (): ProfileType['proxyGroupsConfig'] =>
       use: [],
       url: '',
       interval: 300,
-      tolerance: 150
+      tolerance: 150,
+      filter: ''
     }
   ]
 }

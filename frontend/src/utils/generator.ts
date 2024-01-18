@@ -2,6 +2,7 @@ import { Readfile, Writefile } from '@/utils/bridge'
 import { deepClone, ignoredError } from '@/utils'
 import { KernelConfigFilePath, ProxyGroup } from '@/constant/kernel'
 import { type ProfileType, useSubscribesStore, useRulesetsStore } from '@/stores'
+import { TunConfigDefaults } from '@/constant'
 
 const generateCommonRule = (rule: Record<string, any>) => {
   const { type, payload, invert } = rule
@@ -240,15 +241,20 @@ const generateInBoundsConfig = async (profile: ProfileType) => {
 
   const listenConfig = {
     sniff: profile.advancedConfig.sniff,
-    sniff_override_destination: profile.advancedConfig['sniff-override-destination']
+    sniff_override_destination: profile.advancedConfig['sniff-override-destination'],
+    ...(profile.advancedConfig.domain_strategy && profile.advancedConfig.domain_strategy.length > 0
+      ? { domain_strategy: profile.advancedConfig.domain_strategy }
+      : {})
   }
+
+  const listen = profile.generalConfig['allow-lan'] ? '::' : '127.0.0.1'
 
   if (profile.generalConfig['mixed-port'] > 0) {
     http_proxy_port = profile.generalConfig['mixed-port']
 
     inbounds.push({
       type: 'mixed',
-      listen: profile.generalConfig['allow-lan'] ? '::' : '127.0.0.1',
+      listen: listen,
       listen_port: profile.generalConfig['mixed-port'],
       ...listenConfig,
       tcp_fast_open: profile.advancedConfig['tcp-fast-open'],
@@ -264,7 +270,7 @@ const generateInBoundsConfig = async (profile: ProfileType) => {
 
     inbounds.push({
       type: 'http',
-      listen: profile.generalConfig['allow-lan'] ? '::' : '127.0.0.1',
+      listen: listen,
       listen_port: profile.advancedConfig.port,
       ...listenConfig,
       tcp_fast_open: profile.advancedConfig['tcp-fast-open'],
@@ -276,7 +282,7 @@ const generateInBoundsConfig = async (profile: ProfileType) => {
   if (profile.advancedConfig['socks-port'] > 0) {
     inbounds.push({
       type: 'socks',
-      listen: profile.generalConfig['allow-lan'] ? '::' : '127.0.0.1',
+      listen: listen,
       listen_port: profile.advancedConfig['socks-port'],
       ...listenConfig,
       tcp_fast_open: profile.advancedConfig['tcp-fast-open'],
@@ -286,11 +292,26 @@ const generateInBoundsConfig = async (profile: ProfileType) => {
   }
 
   if (profile.tunConfig.enable) {
+    let inet4_address = profile.tunConfig['inet4-address']
+    let inet6_address = profile.tunConfig['inet6-address']
+
+    if (profile.advancedConfig.domain_strategy === 'ipv4_only') {
+      inet6_address = ''
+    } else if (profile.advancedConfig.domain_strategy === 'ipv6_only') {
+      inet4_address = ''
+    }
+    if (inet4_address === undefined) {
+      inet4_address = TunConfigDefaults['inet4-address']
+    }
+    if (inet6_address === undefined) {
+      inet6_address = TunConfigDefaults['inet6-address']
+    }
+
     inbounds.push({
       type: 'tun',
       interface_name: profile.tunConfig.interface_name,
-      inet4_address: '172.19.0.1/30',
-      inet6_address: 'fdfe:dcba:9876::1/126',
+      ...(inet4_address.length > 0 ? { inet4_address: inet4_address } : {}),
+      ...(inet6_address.length > 0 ? { inet6_address: inet6_address } : {}),
       mtu: profile.tunConfig.mtu,
       auto_route: profile.tunConfig['auto-route'],
       strict_route: profile.tunConfig['strict-route'],
@@ -309,6 +330,13 @@ const generateInBoundsConfig = async (profile: ProfileType) => {
   return inbounds
 }
 
+const filterProxy = (proxy: { type: string; tag: string }, filter: string) => {
+  if (!filter || filter.length == 0 || proxy.type === 'built-in') {
+    return true
+  }
+  return new RegExp(filter).test(proxy.tag)
+}
+
 const generateOutBoundsConfig = async (groups: ProfileType['proxyGroupsConfig']) => {
   const outbounds = []
 
@@ -317,7 +345,6 @@ const generateOutBoundsConfig = async (groups: ProfileType['proxyGroupsConfig'])
   groups.forEach((group) => {
     group.use.forEach((use) => subs.add(use))
   })
-
   const proxyMap: Record<string, ProxiesType[]> = {}
   const proxyTags = new Set<string>()
   const proxies: any = []
@@ -329,6 +356,14 @@ const generateOutBoundsConfig = async (groups: ProfileType['proxyGroupsConfig'])
       try {
         const subStr = await Readfile(sub.path)
         const subProxies = JSON.parse(subStr)
+        
+        // let subProxies = JSON.parse(subStr)
+        // subProxies = sub.proxies
+        //   .map((proxy) => {
+        //     return subProxies.find((v: any) => v.tag === proxy.tag)
+        //   })
+        //   .filter((v) => v !== undefined)
+
         proxyMap[sub.id] = subProxies
         for (const subProxy of subProxies) {
           proxyTags.add(subProxy.tag)
@@ -342,7 +377,7 @@ const generateOutBoundsConfig = async (groups: ProfileType['proxyGroupsConfig'])
 
   for (const group of groups) {
     for (const proxy of group.proxies)
-      if (proxy.type !== 'built-in') {
+      if (proxy.type !== 'built-in' && filterProxy(proxy, group.filter)) {
         if (!proxyTags.has(proxy.tag)) {
           if (!proxyMap[proxy.type]) {
             const sub = subscribesStore.getSubscribeById(proxy.type)
@@ -367,9 +402,27 @@ const generateOutBoundsConfig = async (groups: ProfileType['proxyGroupsConfig'])
       }
   }
 
-  function getGroupOutbounds(group_proxies: any[], uses: string[]) {
-    const outbounds = group_proxies.map((proxy) => proxy.tag)
-    outbounds.push(...uses.map((use) => proxyMap[use].map((proxy) => proxy.tag)).flat())
+  const usedProxies = new Set<string>()
+
+  function getGroupOutbounds(group_proxies: any[], uses: string[], filter: string) {
+    const outbounds = group_proxies
+      .filter((proxy) => filterProxy(proxy, filter))
+      .map((proxy) => {
+        usedProxies.add(proxy.tag)
+        return proxy.tag
+      })
+    outbounds.push(
+      ...uses
+        .map((use) =>
+          proxyMap[use]
+            .filter((proxy) => filterProxy(proxy, filter))
+            .map((proxy) => {
+              usedProxies.add(proxy.tag)
+              return proxy.tag
+            })
+        )
+        .flat()
+    )
     return outbounds
   }
 
@@ -378,19 +431,19 @@ const generateOutBoundsConfig = async (groups: ProfileType['proxyGroupsConfig'])
       outbounds.push({
         tag: group.tag,
         type: 'selector',
-        outbounds: getGroupOutbounds(group.proxies, group.use)
+        outbounds: getGroupOutbounds(group.proxies, group.use, group.filter)
       })
     group.type === ProxyGroup.UrlTest &&
       outbounds.push({
         tag: group.tag,
         type: 'urltest',
-        outbounds: getGroupOutbounds(group.proxies, group.use),
+        outbounds: getGroupOutbounds(group.proxies, group.use, group.filter),
         url: group.url,
         interval: group.interval.toString() + 's',
         tolerance: group.tolerance
       })
   })
-  outbounds.push(...proxies)
+  outbounds.push(...proxies.filter((v: any) => usedProxies.has(v.tag)))
   return outbounds
 }
 
@@ -477,7 +530,7 @@ export const generateConfig = async (profile: ProfileType) => {
         ...(inet6_range.length > 0 ? { inet6_range: inet6_range } : {})
       },
       final: profile.dnsConfig['final-dns'],
-      strategy: profile.dnsConfig.strategy
+      ...(profile.dnsConfig.strategy.length > 0 ? { strategy: profile.dnsConfig.strategy } : {})
     }
   }
   return config

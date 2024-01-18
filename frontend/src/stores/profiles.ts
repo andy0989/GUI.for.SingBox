@@ -27,6 +27,7 @@ export type ProfileType = {
       'store-cache'?: boolean
       'store-fake-ip'?: boolean
     }
+    domain_strategy: string
     'tcp-fast-open': boolean
     'tcp-multi-path': boolean
     'udp-fragment': boolean
@@ -40,7 +41,9 @@ export type ProfileType = {
     interface_name: string
     mtu: number
     'strict-route': boolean
-    'endpoint-independent-nat': boolean
+    'endpoint-independent-nat': boolean,
+    'inet4-address': string,
+    'inet6-address': string
   }
   dnsConfig: {
     enable: boolean
@@ -68,7 +71,8 @@ export type ProfileType = {
     }[]
     url: string
     interval: number
-    tolerance: number
+    tolerance: number,
+    filter: string
   }[]
   rulesConfig: {
     id: string
